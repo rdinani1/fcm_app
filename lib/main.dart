@@ -1,16 +1,17 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'firebase_options.dart';
 
-/// 🔥 REQUIRED for background messages
-@pragma('vm:entry-point')
-Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
+Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
   );
 
-  print("🔴 Background message: ${message.messageId}");
+  print("Background message received:");
+  print("Title: ${message.notification?.title}");
+  print("Body: ${message.notification?.body}");
 }
 
 void main() async {
@@ -20,96 +21,132 @@ void main() async {
     options: DefaultFirebaseOptions.currentPlatform,
   );
 
-  // Register background handler
-  FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
+  FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
 
   runApp(const MyApp());
 }
 
-class MyApp extends StatefulWidget {
+class MyApp extends StatelessWidget {
   const MyApp({super.key});
-
-  @override
-  State<MyApp> createState() => _MyAppState();
-}
-
-class _MyAppState extends State<MyApp> {
-  String text = "Waiting for message...";
-  String image = "assets/images/default.png";
-
-  @override
-  void initState() {
-    super.initState();
-
-    // 🔐 Request permission (important for Android 13+ & iOS)
-    FirebaseMessaging.instance.requestPermission();
-
-    // 📱 Get FCM Token
-    FirebaseMessaging.instance.getToken().then((token) {
-      print("🔥 FCM TOKEN: $token");
-    });
-
-    /// 🟢 FOREGROUND (app open)
-    FirebaseMessaging.onMessage.listen((RemoteMessage message) {
-      print("🟢 Foreground message received");
-
-      updateUI(message, "Foreground message");
-    });
-
-    /// 🟡 BACKGROUND (user taps notification)
-    FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage message) {
-      print("🟡 Opened from background");
-
-      updateUI(message, "Opened from notification");
-    });
-
-    /// 🔴 TERMINATED (app was closed)
-    FirebaseMessaging.instance.getInitialMessage().then((message) {
-      if (message != null) {
-        print("🔴 App launched from notification");
-
-        updateUI(message, "App launched from notification");
-      }
-    });
-  }
-
-  /// 🔄 Central UI update function
-  void updateUI(RemoteMessage message, String fallbackText) {
-    final assetName = message.data['asset'] ?? 'default';
-
-    // Prevent crashes if wrong asset sent
-    final allowed = {'default', 'promo'};
-
-    setState(() {
-      text = message.notification?.title ?? fallbackText;
-      image = allowed.contains(assetName)
-          ? "assets/images/$assetName.png"
-          : "assets/images/default.png";
-    });
-  }
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
-      home: Scaffold(
-        appBar: AppBar(
-          title: const Text("Task Manager FCM"),
-          centerTitle: true,
-        ),
-        body: Center(
+      title: 'FCM Notification App',
+      home: const HomeScreen(),
+    );
+  }
+}
+
+class HomeScreen extends StatefulWidget {
+  const HomeScreen({super.key});
+
+  @override
+  State<HomeScreen> createState() => _HomeScreenState();
+}
+
+class _HomeScreenState extends State<HomeScreen> {
+  String notificationTitle = "No Notification Yet";
+  String notificationBody = "Waiting...";
+  String currentImage = "assets/images/default.png";
+
+  Timer? _resetTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    setupFCM();
+  }
+
+  @override
+  void dispose() {
+    _resetTimer?.cancel();
+    super.dispose();
+  }
+
+  Future<void> setupFCM() async {
+    FirebaseMessaging messaging = FirebaseMessaging.instance;
+
+    await messaging.requestPermission(
+      alert: true,
+      badge: true,
+      sound: true,
+    );
+
+    String? token = await messaging.getToken();
+    print("FCM Token: $token");
+
+    FirebaseMessaging.onMessage.listen((RemoteMessage message) {
+      print("Foreground message received");
+      print("Title: ${message.notification?.title}");
+      print("Body: ${message.notification?.body}");
+
+      setState(() {
+        notificationTitle = message.notification?.title ?? "No Title";
+        notificationBody = message.notification?.body ?? "No Body";
+        currentImage = "assets/images/promo.png";
+      });
+
+      // Cancel old timer if another notification comes in
+      _resetTimer?.cancel();
+
+      // Reset image after 5 seconds
+      _resetTimer = Timer(const Duration(seconds: 5), () {
+        if (!mounted) return;
+
+        setState(() {
+          currentImage = "assets/images/default.png";
+        });
+
+        print("Image reset to default");
+      });
+    });
+
+    FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage message) {
+      print("Notification clicked");
+      print("Title: ${message.notification?.title}");
+      print("Body: ${message.notification?.body}");
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text("FCM Notification App"),
+        centerTitle: true,
+      ),
+      body: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(20),
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
+              Image.asset(
+                currentImage,
+                height: 200,
+                fit: BoxFit.contain,
+              ),
+              const SizedBox(height: 30),
+              const Text(
+                "Last Notification:",
+                style: TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 10),
               Text(
-                text,
-                style: const TextStyle(fontSize: 20),
+                notificationTitle,
+                style: const TextStyle(fontSize: 18),
                 textAlign: TextAlign.center,
               ),
-              const SizedBox(height: 20),
-              Image.asset(
-                image,
-                height: 150,
+              const SizedBox(height: 5),
+              Text(
+                notificationBody,
+                style: const TextStyle(fontSize: 16),
+                textAlign: TextAlign.center,
               ),
             ],
           ),
